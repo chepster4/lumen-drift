@@ -27,11 +27,11 @@
         tw: rng() * Math.PI * 2
       });
     }
-    for (var n = 0; n < 5; n++) {
+    for (var n = 0; n < 9; n++) {
       nebulae.push({
         x: rng() * W, y: rng() * H,
         r: 160 + rng() * 220,
-        color: n % 2 ? P.nebulaA : P.nebulaB
+        color: [P.nebulaA, P.nebulaB, '#20083a'][n % 3]
       });
     }
 
@@ -79,7 +79,8 @@
     function drawLumen(l) {
       var pulse = 1 + 0.18 * Math.sin(l.phase);
       var r = l.r * pulse;
-      var col = l.kind === 'gold' ? P.gold : P.cyan;
+      var col = l.kind === 'gold' ? P.gold :
+        (l.kind === 'violet' ? P.violet : P.cyan);
       var glow = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, r * 3);
       glow.addColorStop(0, col);
       glow.addColorStop(0.35, col + '55');
@@ -100,19 +101,26 @@
     }
 
     function drawMeteor(m) {
+      // Warna + bentuk mengikuti tipe musuh (batu, pemburu, pemecah,
+      // penembak, pecahan) supaya tiap ancaman langsung terbaca.
+      var mcol = P.danger, mcore = '#3a1020', mglow = 'rgba(255,59,78,0.55)';
+      if (m.type === 'chaser') { mcol = '#c44dff'; mcore = '#1d0a33'; mglow = 'rgba(196,77,255,0.55)'; }
+      else if (m.type === 'splitter') { mcol = '#ff9f1c'; mcore = '#331505'; mglow = 'rgba(255,159,28,0.55)'; }
+      else if (m.type === 'shooter') { mcol = '#ffb347'; mcore = '#33230a'; mglow = 'rgba(255,179,71,0.55)'; }
+      else if (m.type === 'shard') { mcol = '#ff6b81'; mcore = '#2a0a12'; mglow = 'rgba(255,107,129,0.55)'; }
       ctx.save();
       ctx.translate(m.x, m.y);
       ctx.rotate(m.rot);
       var glow = ctx.createRadialGradient(0, 0, m.r * 0.4, 0, 0, m.r * 2.1);
-      glow.addColorStop(0, 'rgba(255,59,78,0.55)');
+      glow.addColorStop(0, mglow);
       glow.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = glow;
       ctx.beginPath();
       ctx.arc(0, 0, m.r * 2.1, 0, Math.PI * 2);
       ctx.fill();
       // Batu bersudut: poligon acak tapi tetap (dari rotasi).
-      ctx.fillStyle = '#3a1020';
-      ctx.strokeStyle = P.danger;
+      ctx.fillStyle = mcore;
+      ctx.strokeStyle = mcol;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       var pts = 7;
@@ -133,7 +141,52 @@
       ctx.lineTo(0, m.r * 0.1);
       ctx.lineTo(m.r * 0.45, -m.r * 0.35);
       ctx.stroke();
+      // Penanda tipe: mata pemburu, cincin sumbu pemecah, laras penembak.
+      if (m.type === 'chaser') {
+        ctx.fillStyle = P.white;
+        ctx.beginPath();
+        ctx.arc(m.r * 0.25, -m.r * 0.15, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#c44dff';
+        ctx.beginPath();
+        ctx.arc(m.r * 0.25, -m.r * 0.15, 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (m.type === 'splitter') {
+        ctx.strokeStyle = '#ff9f1c';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(tGlobal * 5 + m.rot);
+        ctx.beginPath();
+        ctx.arc(0, 0, m.r + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else if (m.type === 'shooter') {
+        ctx.strokeStyle = '#ffb347';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(m.r * 1.1, 0);
+        ctx.stroke();
+      }
       ctx.restore();
+    }
+
+    // Tembakan musuh: peluru cahaya magenta berpendar.
+    function drawShots(world) {
+      for (var i = 0; i < world.shots.length; i++) {
+        var s = world.shots[i];
+        var glow = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 2.6);
+        glow.addColorStop(0, 'rgba(255,255,255,0.95)');
+        glow.addColorStop(0.35, P.magenta);
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r * 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = P.magenta;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     function drawBoss(b) {
@@ -171,6 +224,14 @@
       ctx.beginPath();
       ctx.arc(0, 0, b.r * 0.45, 0, Math.PI * 2);
       ctx.fill();
+      // Fase III: cincin murka merah di sekeliling cakram.
+      if ((b.phase || 1) === 3) {
+        ctx.strokeStyle = 'rgba(255,59,78,0.85)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, b.r + 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.restore();
       // Nama boss + bar HP di BAWAH boss (atas layar ditempati HUD).
       ctx.fillStyle = P.magenta;
@@ -189,6 +250,18 @@
       ctx.lineWidth = 1.5;
       rr(bx, by, bw, 14, 7);
       ctx.stroke();
+      // Pip fase (I/II/III) di bawah bar HP.
+      var ph = b.phase || 1;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = P.magentaSoft;
+      ctx.font = 'bold 20px system-ui, sans-serif';
+      ctx.fillText('FASE ' + ['I', 'II', 'III'][ph - 1], bx, by + 38);
+      for (var pi = 0; pi < 3; pi++) {
+        ctx.fillStyle = pi < ph ? P.magenta : 'rgba(255,255,255,0.25)';
+        ctx.beginPath();
+        ctx.arc(bx + bw - 12 - pi * 22, by + 31, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     function drawPowerup(p) {
@@ -302,6 +375,14 @@
       ctx.fillStyle = P.white;
       ctx.font = 'bold 40px system-ui, sans-serif';
       ctx.fillText(String(world.score), 20, 60);
+      // Bank lumen (mata uang toko) + pelindung kombo — bawah panel atas.
+      ctx.fillStyle = P.gold;
+      ctx.font = 'bold 22px system-ui, sans-serif';
+      ctx.fillText('◆ LUMEN ' + world.bank, 20, 92);
+      if (world.guardCharges > 0) {
+        ctx.fillStyle = P.shield;
+        ctx.fillText('GUARD x' + world.guardCharges, 200, 92);
+      }
 
       // Kombo + multiplier — tengah.
       var mult = world.multiplier();
@@ -336,7 +417,7 @@
       // Label gelombang + skor terbaik di bawah hati.
       ctx.fillStyle = P.gold;
       ctx.font = 'bold 20px system-ui, sans-serif';
-      ctx.fillText('WAVE ' + world.wave + '   BEST ' + Math.max(world.best, world.score), W - 22, 62);
+      ctx.fillText('WAVE ' + world.wave + ' • ' + (world.diff ? world.diff.name : 'DRIFT') + '   BEST ' + Math.max(world.best, world.score), W - 22, 62);
 
       // Bar progres gelombang di bawah panel atas (penuh = gelombang naik).
       var wp = Math.min(1, world.waveTime / CFG.wave.duration);
@@ -383,20 +464,78 @@
       centerText('— arcade neon: kumpulkan cahaya, hindari meteor —', 372, 26, P.goldSoft);
       // Panel cara main.
       ctx.fillStyle = 'rgba(10,4,32,0.78)';
-      rr(W / 2 - 380, 408, 760, 150, 16);
+      rr(W / 2 - 380, 396, 760, 138, 16);
       ctx.fill();
       ctx.strokeStyle = 'rgba(34,230,255,0.5)';
       ctx.lineWidth = 2;
-      rr(W / 2 - 380, 408, 760, 150, 16);
+      rr(W / 2 - 380, 396, 760, 138, 16);
       ctx.stroke();
-      centerText('Gerakkan orb dengan WASD / Panah / Mouse', 448, 24, P.white);
-      centerText('Kumpulkan lumen berantai = kombo x8  •  Hindari meteor', 482, 22, P.cyanSoft);
-      centerText('Power-up: S Perisai  •  T Slow-Mo  •  M Magnet  •  Boss tiap Wave 5', 516, 22, P.magentaSoft);
+      centerText('Gerakkan orb dengan WASD / Panah / Mouse', 428, 24, P.white);
+      centerText('Kumpulkan lumen berantai = kombo x8  •  Lumen dekat meteor = RISIKO x2', 458, 22, P.cyanSoft);
+      centerText('Musuh baru: Pemburu, Pemecah, Penembak  •  Boss VOID MAW 3 fase', 488, 22, P.magentaSoft);
+      centerText('Toko tiap Wave genap: 1-5 beli upgrade  •  Power-up: S / T / M', 518, 22, P.goldSoft);
+      // Pilih kesulitan: 3 kotak (1/2/3 atau panah kiri-kanan).
+      var diffs = global.LUMEN_DIFFICULTY.LIST;
+      for (var d = 0; d < 3; d++) {
+        var bx = 260 + d * 257, by = 552, bw = 245, bh = 40;
+        var sel = world.diffIndex === d;
+        ctx.fillStyle = sel ? 'rgba(34,230,255,0.22)' : 'rgba(10,4,32,0.78)';
+        rr(bx, by, bw, bh, 10);
+        ctx.fill();
+        ctx.strokeStyle = sel ? P.cyan : 'rgba(34,230,255,0.35)';
+        ctx.lineWidth = sel ? 3 : 2;
+        rr(bx, by, bw, bh, 10);
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = sel ? P.white : P.cyanSoft;
+        ctx.font = 'bold 19px system-ui, sans-serif';
+        ctx.fillText((d + 1) + '  ' + diffs[d].name + '  •  ' + diffs[d].lives + ' NYAWA', bx + bw / 2, by + 26);
+      }
+      centerText('← → / 1-3 PILIH KESULITAN — ' + diffs[world.diffIndex].desc, 616, 22, P.goldSoft);
       // Ajakan mulai berkedip.
       if (Math.floor(tGlobal * 1.6) % 2 === 0) {
-        centerText('TEKAN ENTER ATAU KLIK UNTUK MULAI', 612, 34, P.white);
+        centerText('TEKAN ENTER ATAU KLIK UNTUK MULAI', 652, 34, P.white);
       }
-      centerText('Skor terbaik: ' + world.best, 664, 24, P.goldSoft);
+      centerText('Skor terbaik: ' + world.best, 690, 24, P.goldSoft);
+    }
+
+    // Panel toko antar-gelombang: 5 upgrade, bayar dengan bank lumen.
+    function drawShop(world) {
+      ctx.fillStyle = 'rgba(4,0,16,0.72)';
+      ctx.fillRect(0, 0, W, H);
+      centerText('TOKO LUMEN — WAVE ' + world.wave + ' SELESAI', 150, 54, P.gold);
+      centerText('Belanjakan lumenmu sebelum gelombang berikut!', 192, 24, P.cyanSoft);
+      var shop = world.shop;
+      var x0 = W / 2 - 360, w = 720, y0 = 224, rowH = 62;
+      for (var i = 0; i < shop.items.length; i++) {
+        var it = shop.items[i];
+        var lvl = shop.levelOf(world, it.id);
+        var cost = it.cost(lvl);
+        var maxed = lvl >= it.max;
+        var afford = !maxed && world.bank >= cost;
+        var y = y0 + i * rowH;
+        ctx.fillStyle = shop.selected === i ? 'rgba(34,230,255,0.16)' : 'rgba(10,4,32,0.82)';
+        rr(x0, y, w, 52, 10);
+        ctx.fill();
+        ctx.strokeStyle = shop.selected === i ? P.cyan : 'rgba(34,230,255,0.35)';
+        ctx.lineWidth = 2;
+        rr(x0, y, w, 52, 10);
+        ctx.stroke();
+        ctx.textAlign = 'left';
+        ctx.fillStyle = afford ? P.white : 'rgba(244,251,255,0.45)';
+        ctx.font = 'bold 21px system-ui, sans-serif';
+        ctx.fillText(it.key + '  ' + it.name + '   Lv.' + lvl + '/' + it.max, x0 + 18, y + 33);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = P.cyanSoft;
+        ctx.font = '18px system-ui, sans-serif';
+        ctx.fillText(it.desc, x0 + 340, y + 32);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = maxed ? P.gold : (afford ? P.gold : P.dangerSoft);
+        ctx.font = 'bold 22px system-ui, sans-serif';
+        ctx.fillText(maxed ? 'MAX' : ('◆ ' + cost), x0 + w - 18, y + 33);
+      }
+      centerText('BANK LUMEN: ◆ ' + world.bank, 566, 30, P.gold);
+      centerText('1-5 BELI  •  ↑↓ PILIH  •  ENTER BELI  •  SPASI LANJUT', 610, 26, P.white);
     }
 
     function drawPaused() {
@@ -422,7 +561,8 @@
       centerText(String(world.score), 362, 64, P.white);
       var isBest = world.score >= world.best && world.score > 0;
       centerText(isBest ? '★ SKOR TERBAIK BARU! ★' : 'Skor terbaik: ' + world.best, 412, 28, P.gold);
-      centerText('Wave ' + world.wave + '  •  Lumen ' + world.collected + '  •  Kombo terbaik x' + world.bestCombo, 456, 24, P.cyanSoft);
+      centerText('Wave ' + world.wave + '  •  Lumen ' + world.collected + '  •  Kombo terbaik x' + world.bestCombo, 448, 24, P.cyanSoft);
+      centerText('Toko: ' + world.upgradesBought + ' upgrade dibeli  •  Bank lumen ' + world.bank, 480, 22, P.goldSoft);
       if (Math.floor(tGlobal * 1.6) % 2 === 0) {
         centerText('TEKAN R UNTUK MAIN LAGI', 566, 34, P.white);
       }
@@ -440,11 +580,13 @@
       for (var i = 0; i < world.lumens.length; i++) drawLumen(world.lumens[i]);
       for (var j = 0; j < world.powerups.length; j++) drawPowerup(world.powerups[j]);
       for (var k = 0; k < world.meteors.length; k++) drawMeteor(world.meteors[k]);
+      drawShots(world);
       if (world.bossActive && world.boss) drawBoss(world.boss);
       if (world.state !== 'title') drawPlayer(world);
       drawParticles(world);
       drawFloats(world);
       if (world.state === 'playing' || world.state === 'paused') drawHud(world);
+      if (world.state === 'shop') { drawHud(world); drawShop(world); }
       if (world.state === 'title') drawTitle(world);
       if (world.state === 'paused') drawPaused();
       if (world.state === 'over') { drawHud(world); drawGameOver(world); }

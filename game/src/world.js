@@ -17,7 +17,7 @@
 
   function createWorld() {
     var rng = Math.random;
-    var state = 'title'; // title | playing | paused | over
+    var state = 'title'; // title | playing | paused | over | shop
     var time = 0;
     var wave = 1;
     var waveTime = 0;
@@ -44,6 +44,17 @@
     var floats = []; // teks skor melayang (+10, x3 ...)
     var boss = null; // {x,y,vx,vy,r,hp,maxHp,shotTimer}
     var bossActive = false;
+    var shots = [];       // proyektil musuh (penembak & boss)
+    var bank = 0;         // lumen yang bisa dibelanjakan di toko
+    var guardCharges = 0; // pelindung kombo dari toko, habis saat kena meteor
+    var shieldBonus = 0;  // perisai awal gelombang berikut (toko, detik)
+    var magnetBonus = 0;  // tambahan jangkauan magnet permanen (toko)
+    var speedBonus = 0;   // tambahan kecepatan orb permanen (toko)
+    var shopLevels = {};  // level tiap item toko di run ini
+    var upgradesBought = 0;
+    var diffIndex = 1;    // 0 TENANG, 1 DRIFT, 2 BADAI
+    var diff = global.LUMEN_DIFFICULTY.LIST[1];
+    var shop = global.createShop();
 
     var lumenTimer = 0;
     var meteorTimer = 0;
@@ -61,13 +72,16 @@
       state = 'playing';
       time = 0; wave = 1; waveTime = 0;
       score = 0; combo = 0; comboTimer = 0; bestCombo = 0;
-      lives = CFG.player.startLives;
+      lives = diff.lives;
       collected = 0; meteorsDodged = 0;
+      bank = 0; guardCharges = 0;
+      shieldBonus = 0; magnetBonus = 0; speedBonus = 0;
+      shopLevels = {}; upgradesBought = 0;
       player.x = CFG.WIDTH / 2; player.y = CFG.HEIGHT / 2 + 80;
       player.vx = 0; player.vy = 0;
       player.invuln = 0; player.shield = 0; player.slow = 0; player.magnet = 0;
       player.trail = [];
-      lumens = []; meteors = []; powerups = [];
+      lumens = []; meteors = []; powerups = []; shots = [];
       particles = []; floats = [];
       boss = null; bossActive = false;
       lumenTimer = 0; meteorTimer = 0.6;
@@ -83,6 +97,16 @@
       return Math.min(CFG.lumen.maxMultiplier, 1 + Math.floor(combo / 5));
     }
 
+    // Jarak ke meteor terdekat — dipakai bonus RISIKO x2 saat kumpul lumen.
+    function nearestMeteorDist(x, y) {
+      var best = 1e9;
+      for (var i = 0; i < meteors.length; i++) {
+        var d = dist2(x, y, meteors[i].x, meteors[i].y);
+        if (d < best) best = d;
+      }
+      return Math.sqrt(best);
+    }
+
     function spawnLumen(anywhere) {
       if (lumens.length >= CFG.lumen.maxOnField) return;
       var margin = 60;
@@ -95,16 +119,22 @@
       lumens.push({
         x: x, y: y, r: CFG.lumen.radius,
         phase: rng() * Math.PI * 2,
-        kind: rng() < CFG.lumen.goldChance ? 'gold' : 'cyan', // gold = 5x nilai
+        kind: (function () {
+          var r = rng();
+          if (r < CFG.lumen.goldChance) return 'gold'; // 5x nilai
+          if (r < CFG.lumen.goldChance + CFG.lumen.violetChance) return 'violet'; // 3x nilai
+          return 'cyan';
+        })(),
         vx: (rng() - 0.5) * 24, vy: (rng() - 0.5) * 24
       });
     }
 
-    function spawnMeteor(anywhere) {
+    function spawnMeteor(anywhere, forceType) {
       if (meteors.length >= CFG.meteor.maxOnField) return;
+      var type = forceType || global.LUMEN_ENEMIES.pickType(wave, rng);
       var edge = Math.floor(rng() * 4);
       var x, y, vx, vy;
-      var speed = CFG.meteor.baseSpeed + CFG.meteor.speedPerWave * (wave - 1);
+      var speed = (CFG.meteor.baseSpeed + CFG.meteor.speedPerWave * (wave - 1)) * diff.speedMul;
       speed *= 0.8 + rng() * 0.5;
       if (edge === 0) { x = -30; y = rng() * CFG.HEIGHT; vx = speed; vy = (rng() - 0.5) * speed; }
       else if (edge === 1) { x = CFG.WIDTH + 30; y = rng() * CFG.HEIGHT; vx = -speed; vy = (rng() - 0.5) * speed; }
@@ -114,7 +144,14 @@
         x = 60 + rng() * (CFG.WIDTH - 120);
         y = 90 + rng() * (CFG.HEIGHT - 180);
       }
+      if (type !== 'rock') {
+        var e = global.LUMEN_ENEMIES.make(type, x, y, wave, rng);
+        e.vx = vx; e.vy = vy;
+        meteors.push(e);
+        return;
+      }
       meteors.push({
+        type: 'rock',
         x: x, y: y, vx: vx, vy: vy,
         r: CFG.meteor.baseRadius + rng() * CFG.meteor.radiusJitter,
         rot: rng() * Math.PI * 2,
@@ -139,7 +176,8 @@
         vx: 60, r: CFG.wave.bossRadius,
         hp: CFG.wave.bossHpPerWave + wave,
         maxHp: CFG.wave.bossHpPerWave + wave,
-        shotTimer: 1.2, rot: 0
+        shotTimer: 1.2, rot: 0,
+        radialTimer: 2.4, chaserTimer: 5, _phase: 1, _spiral: 0, phase: 1
       };
       bossActive = true;
       events.push({ type: 'boss' });
@@ -168,24 +206,49 @@
       comboTimer = CFG.lumen.comboWindow;
       if (combo > bestCombo) bestCombo = combo;
       var mult = multiplier();
-      var value = CFG.lumen.baseValue * mult * (l.kind === 'gold' ? 5 : 1);
+      var kindMul = l.kind === 'gold' ? 5 : (l.kind === 'violet' ? 3 : 1);
+      var value = CFG.lumen.baseValue * mult * kindMul * diff.valueMul;
+      // Risk/reward: lumen yang dipungut dekat meteor bernilai ganda.
+      if (nearestMeteorDist(l.x, l.y) < 150) {
+        value *= 2;
+        addFloat(l.x, l.y - 38, 'RISIKO x2', CFG.palette.gold);
+      }
       score += value;
       collected++;
-      burst(l.x, l.y, l.kind === 'gold' ? CFG.palette.gold : CFG.palette.cyan, 14, 200);
-      addFloat(l.x, l.y - 18, '+' + value + (mult > 1 ? '  x' + mult : ''), l.kind === 'gold' ? CFG.palette.gold : CFG.palette.cyanSoft);
+      bank += l.kind === 'gold' ? 3 : (l.kind === 'violet' ? 2 : 1);
+      var burstCol = l.kind === 'gold' ? CFG.palette.gold :
+        (l.kind === 'violet' ? CFG.palette.violet : CFG.palette.cyan);
+      var floatCol = l.kind === 'gold' ? CFG.palette.gold :
+        (l.kind === 'violet' ? CFG.palette.violet : CFG.palette.cyanSoft);
+      burst(l.x, l.y, burstCol, 14, 200);
+      addFloat(l.x, l.y - 18, '+' + value + (mult > 1 ? '  x' + mult : ''), floatCol);
       if (mult > 1 && combo % 5 === 0) flash = CFG.fx.flashOnCombo;
       events.push({ type: 'collect', combo: combo });
     }
 
-    function hitMeteor(m) {
+    function hitMeteor(m, removeFn) {
       if (player.invuln > 0) return;
+      var remove = removeFn || removeMeteor;
       if (player.shield > 0) {
         player.shield = 0;
         burst(player.x, player.y, CFG.palette.shield, 26, 300);
         shake = CFG.fx.shakeOnHit;
         player.invuln = CFG.player.invulnTime;
         events.push({ type: 'shieldBreak' });
-        removeMeteor(m);
+        // Pemecah yang dihancurkan perisai tetap pecah jadi 2.
+        if (m.type === 'splitter') splitEnemy(m);
+        remove(m);
+        return;
+      }
+      // Pelindung kombo (toko): sekali, kombo selamat dari tabrakan.
+      if (guardCharges > 0) {
+        guardCharges--;
+        addFloat(player.x, player.y - 40, 'KOMBO SELAMAT!', CFG.palette.shield);
+        burst(player.x, player.y, CFG.palette.shield, 20, 260);
+        shake = CFG.fx.shakeOnHit;
+        player.invuln = CFG.player.invulnTime;
+        events.push({ type: 'guardSave' });
+        remove(m);
         return;
       }
       lives--;
@@ -194,8 +257,31 @@
       shake = CFG.fx.shakeOnHit;
       player.invuln = CFG.player.invulnTime;
       events.push({ type: 'hit' });
-      removeMeteor(m);
+      remove(m);
       if (lives <= 0) gameOver();
+    }
+
+    // Tembakan musuh kena pemain: sama seperti meteor (perisai/guard/nyawa).
+    function hitShot(s) {
+      hitMeteor(s, function (o) {
+        var i = shots.indexOf(o);
+        if (i >= 0) shots.splice(i, 1);
+      });
+    }
+
+    // Pemecah pecah jadi 2 pecahan cepat (dipanggil saat sumbu habis
+    // atau saat dihancurkan perisai).
+    function splitEnemy(e) {
+      var i = meteors.indexOf(e);
+      if (i >= 0) meteors.splice(i, 1);
+      var parts = global.LUMEN_ENEMIES.splitShards(e, rng);
+      for (var k = 0; k < parts.length; k++) meteors.push(parts[k]);
+      burst(e.x, e.y, global.LUMEN_ENEMIES.COLORS.splitter, 18, 260);
+    }
+
+    function addEnemyShot(x, y, vx, vy) {
+      if (shots.length >= 40) return;
+      shots.push({ x: x, y: y, vx: vx, vy: vy, r: 9, life: 6 });
     }
 
     function removeMeteor(m) {
@@ -208,6 +294,23 @@
       if (score > best) best = score;
       events.push({ type: 'gameover' });
       burst(player.x, player.y, CFG.palette.white, 50, 380);
+    }
+
+    // Toko buka di antara gelombang: permainan membeku sampai ditutup.
+    function openShop() {
+      state = 'shop';
+      shop.selected = 0;
+      events.push({ type: 'shopOpen', wave: wave });
+    }
+
+    function closeShop() {
+      // Perisai awal dari toko aktif saat gelombang baru dimulai.
+      if (shieldBonus > 0) {
+        player.shield = shieldBonus;
+        shieldBonus = 0;
+      }
+      state = 'playing';
+      events.push({ type: 'shopClose' });
     }
 
     function applyPowerup(p) {
@@ -232,13 +335,14 @@
         player.vx += dx * p.mousePull * dt * 10;
         player.vy += dy * p.mousePull * dt * 10;
       }
-      // Redaman + batas kecepatan.
+      // Redaman + batas kecepatan (termasuk bonus toko ORBIT).
       var damp = Math.exp(-p.friction * dt);
       player.vx *= damp; player.vy *= damp;
+      var maxSp = p.maxSpeed * (1 + speedBonus);
       var sp = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
-      if (sp > p.maxSpeed) {
-        player.vx *= p.maxSpeed / sp;
-        player.vy *= p.maxSpeed / sp;
+      if (sp > maxSp) {
+        player.vx *= maxSp / sp;
+        player.vy *= maxSp / sp;
       }
       player.x = clamp(player.x + player.vx * dt, p.radius, CFG.WIDTH - p.radius);
       player.y = clamp(player.y + player.vy * dt, p.radius + 56, CFG.HEIGHT - p.radius);
@@ -265,7 +369,12 @@
         score += CFG.scoring.waveClear;
         addFloat(CFG.WIDTH / 2, CFG.HEIGHT / 2 - 60, 'WAVE ' + wave + '  +' + CFG.scoring.waveClear, CFG.palette.gold);
         events.push({ type: 'waveClear', wave: wave });
-        if (wave % CFG.wave.bossEvery === 0) spawnBoss();
+        if (wave % CFG.wave.bossEvery === 0) {
+          spawnBoss();
+        } else if (wave % 2 === 0) {
+          // Toko buka di tiap gelombang genap (bukan gelombang boss).
+          openShop();
+        }
       }
 
       updatePlayer(sdt, input);
@@ -285,7 +394,7 @@
       meteorTimer -= dt;
       if (meteorTimer <= 0) {
         meteorTimer = Math.max(CFG.meteor.minSpawnEvery,
-          CFG.meteor.spawnEvery - CFG.meteor.spawnShrink * (wave - 1)) * (0.75 + rng() * 0.5);
+          CFG.meteor.spawnEvery - CFG.meteor.spawnShrink * (wave - 1)) * diff.spawnMul * (0.75 + rng() * 0.5);
         spawnMeteor(false);
       }
       powerTimer -= dt;
@@ -300,8 +409,9 @@
         l.phase += dt * CFG.lumen.pulseSpeed;
         l.x += l.vx * sdt; l.y += l.vy * sdt;
         if (player.magnet > 0) {
+          var mRadius = CFG.powerup.magnetRadius + magnetBonus;
           var d2 = dist2(l.x, l.y, player.x, player.y);
-          if (d2 < CFG.powerup.magnetRadius * CFG.powerup.magnetRadius) {
+          if (d2 < mRadius * mRadius) {
             var d = Math.sqrt(d2) || 1;
             l.x += (player.x - l.x) / d * 420 * sdt;
             l.y += (player.y - l.y) / d * 420 * sdt;
@@ -318,6 +428,16 @@
       // Meteor: gerak, pantul di tepi, graze, tabrakan.
       for (var j = meteors.length - 1; j >= 0; j--) {
         var m = meteors[j];
+        // Musuh bertipe punya perilaku sendiri (kejar/tembak/pecah).
+        if (m.type && m.type !== 'rock' && m.type !== 'shard') {
+          global.LUMEN_ENEMIES.steer(m, sdt, player.x, player.y, {
+            shot: addEnemyShot,
+            split: splitEnemy,
+            rng: rng, time: time, wave: wave
+          });
+          // Splitter bisa hilang sendiri saat sumbunya habis.
+          if (meteors.indexOf(m) < 0) continue;
+        }
         m.x += m.vx * sdt; m.y += m.vy * sdt;
         m.rot += m.spin * sdt;
         if (m.x < -60 || m.x > CFG.WIDTH + 60 || m.y < -60 || m.y > CFG.HEIGHT + 60) {
@@ -336,6 +456,20 @@
         }
       }
 
+      // Tembakan musuh: gerak lurus, hilang di tepi / saat kena pemain.
+      for (var q = shots.length - 1; q >= 0; q--) {
+        var sh = shots[q];
+        sh.x += sh.vx * sdt; sh.y += sh.vy * sdt;
+        sh.life -= sdt;
+        if (sh.life <= 0 || sh.x < -20 || sh.x > CFG.WIDTH + 20 || sh.y < -20 || sh.y > CFG.HEIGHT + 20) {
+          shots.splice(q, 1);
+          continue;
+        }
+        if (dist2(sh.x, sh.y, player.x, player.y) < (sh.r + player.r) * (sh.r + player.r)) {
+          hitShot(sh);
+        }
+      }
+
       // Power-up: koleksi.
       for (var k = powerups.length - 1; k >= 0; k--) {
         var pu = powerups[k];
@@ -346,25 +480,21 @@
         }
       }
 
-      // Boss: masuk dari atas, melayang, menembak meteor kecil.
+      // Boss: gerak + serangan diatur mesin fase di boss.js.
       if (bossActive && boss) {
-        if (boss.y < 130) boss.y += boss.vy * sdt;
-        else {
-          boss.x += boss.vx * sdt;
-          if (boss.x < 120 || boss.x > CFG.WIDTH - 120) boss.vx *= -1;
-        }
-        boss.rot += sdt * 0.6;
-        boss.shotTimer -= sdt;
-        if (boss.shotTimer <= 0 && boss.y > 0) {
-          boss.shotTimer = CFG.wave.bossShotEvery;
-          var ang = Math.atan2(player.y - boss.y, player.x - boss.x);
-          var bs = 190 + wave * 6;
-          meteors.push({
-            x: boss.x, y: boss.y + boss.r * 0.6,
-            vx: Math.cos(ang) * bs, vy: Math.sin(ang) * bs,
-            r: 13, rot: 0, spin: 3, grazed: false
-          });
-        }
+        global.LUMEN_BOSS.update(boss, sdt, player, {
+          shot: addEnemyShot,
+          chaser: function (x, y) {
+            var c = global.LUMEN_ENEMIES.make('chaser', x, y, wave, rng);
+            c.vx = (rng() - 0.5) * 120; c.vy = 60 + rng() * 60;
+            meteors.push(c);
+          },
+          burst: burst,
+          float: addFloat,
+          event: function (type, data) { events.push({ type: type, phase: data }); },
+          wave: wave, width: CFG.WIDTH, shotEvery: CFG.wave.bossShotEvery
+        });
+        boss.phase = global.LUMEN_BOSS.phaseOf(boss);
         // Orb menabrak boss = hit ke boss (bukan mati).
         if (dist2(boss.x, boss.y, player.x, player.y) < (boss.r + player.r) * (boss.r + player.r)) {
           boss.hp--;
@@ -384,6 +514,8 @@
             shake = CFG.fx.shakeOnBoss;
             boss = null; bossActive = false;
             events.push({ type: 'bossDown' });
+            // Hadiah tambahan: toko buka setelah boss kalah.
+            openShop();
           }
         }
       }
@@ -445,6 +577,29 @@
       get shake() { return shake; },
       get flash() { return flash; },
       get slowFactor() { return slowFactor; },
+      get shots() { return shots; },
+      get bank() { return bank; },
+      set bank(v) { bank = v; },
+      get guardCharges() { return guardCharges; },
+      set guardCharges(v) { guardCharges = v; },
+      get shieldBonus() { return shieldBonus; },
+      set shieldBonus(v) { shieldBonus = v; },
+      get magnetBonus() { return magnetBonus; },
+      set magnetBonus(v) { magnetBonus = v; },
+      get speedBonus() { return speedBonus; },
+      set speedBonus(v) { speedBonus = v; },
+      get shopLevels() { return shopLevels; },
+      get upgradesBought() { return upgradesBought; },
+      set upgradesBought(v) { upgradesBought = v; },
+      get diffIndex() { return diffIndex; },
+      set diffIndex(v) { diffIndex = v; },
+      get diff() { return diff; },
+      set diff(v) { diff = v; },
+      get shop() { return shop; },
+      setDifficulty: function (idx) { global.LUMEN_DIFFICULTY.apply(this, idx); },
+      openShop: openShop,
+      closeShop: closeShop,
+      addEnemyShot: addEnemyShot,
       multiplier: multiplier,
       reset: reset,
       update: update,

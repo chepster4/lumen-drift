@@ -51,6 +51,7 @@
       spawnEvery: 0.85,   // detik antar spawn lumen (dasar)
       maxOnField: 14,
       goldChance: 0.12,   // peluang lumen emas (nilai 5x)
+      violetChance: 0.10, // peluang lumen ungu (nilai 3x)
       pulseSpeed: 3.2
     },
 
@@ -97,7 +98,7 @@
 
     // --- Visual ---
     fx: {
-      starCount: 130,     // bintang latar parallax
+      starCount: 260,     // bintang latar parallax (lebih padat)
       particleCap: 420,   // jumlah partikel maksimum
       shakeOnHit: 14,     // px screen shake saat kena meteor
       shakeOnBoss: 8,
