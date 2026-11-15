@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUMEN DRIFT — arcade neon dodge-and-collect</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%2322e6ff'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23ffffff'/%3E%3C/svg%3E">
+<meta name="description" content="LUMEN DRIFT: kendalikan orb cahaya, kumpulkan lumen berantai, hindari meteor, kalahkan VOID MAW. Game arcade neon 2D yang berjalan offline.">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: #05010f;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #f4fbff;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 12px;
+  }
+  #wrap {
+    width: min(1280px, 100%);
+    aspect-ratio: 16 / 9;
+    box-shadow: 0 0 64px rgba(34, 230, 255, 0.22), 0 0 120px rgba(255, 47, 179, 0.14);
+    border: 1px solid rgba(34, 230, 255, 0.35);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    background: #05010f;
+  }
+  #foot {
+    margin-top: 10px;
+    font-size: 14px;
+    color: rgba(244, 251, 255, 0.6);
+    text-align: center;
+  }
+  #foot b { color: #7df3ff; }
+</style>
+</head>
+<body>
+  <div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div>
+  <noscript><p style="color:#ff8a94;margin-top:12px">LUMEN DRIFT butuh JavaScript untuk bermain.</p></noscript>
+  <p id="foot"><b>LUMEN DRIFT</b> — WASD / panah / mouse untuk bergerak &nbsp;•&nbsp; Spasi atau P jeda &nbsp;•&nbsp; R mulai ulang &nbsp;•&nbsp; M suara</p>
+  <script src="src/config.js"></script>
+  <script src="src/input.js"></script>
+  <script src="src/audio.js"></script>
+  <script src="src/world.js"></script>
+  <script src="src/render.js"></script>
+  <script src="src/shots.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>
